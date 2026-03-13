@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>쿠폰·포인트 주간 대시보드 | 자동 업데이트</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#080b14;--surface:#0f1322;--surface2:#161a2e;
+  --border:rgba(100,130,255,0.13);--border2:rgba(100,130,255,0.3);
+  --accent:#5b7fff;--up:#00dfa2;--down:#ff6b7a;--warn:#ffbe5c;--purple:#c77dff;
+  --text:#e4e8ff;--muted:#6b72a8;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif;min-height:100vh;}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 40% at 10% 10%,rgba(91,127,255,0.07) 0%,transparent 70%),
+             radial-gradient(ellipse 50% 40% at 90% 85%,rgba(0,223,162,0.05) 0%,transparent 70%);z-index:0;}
+nav{position:sticky;top:0;z-index:100;background:rgba(8,11,20,0.93);backdrop-filter:blur(16px);border-bottom:1px solid var(--border);}
+.nav-inner{max-width:1440px;margin:0 auto;padding:0 24px;display:flex;align-items:center;height:56px;gap:4px;overflow-x:auto;}
+.logo{font-size:.95rem;font-weight:900;margin-right:16px;white-space:nowrap;flex-shrink:0;}
+.logo span{color:var(--accent);}
+.ntab{padding:7px 13px;border-radius:8px;font-size:.78rem;font-weight:600;color:var(--muted);cursor:pointer;transition:all .2s;border:none;background:none;white-space:nowrap;flex-shrink:0;}
+.ntab:hover{color:var(--text);background:rgba(91,127,255,0.08);}
+.ntab.active{color:var(--accent);background:rgba(91,127,255,0.15);}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--up);animation:pulse 2s infinite;}
+.period-badge{font-size:.7rem;font-family:'JetBrains Mono',monospace;color:var(--muted);background:rgba(91,127,255,0.1);border:1px solid var(--border);border-radius:6px;padding:3px 10px;white-space:nowrap;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.container{max-width:1440px;margin:0 auto;padding:24px;position:relative;z-index:1;}
+
+/* UPLOAD */
+.upload-section{margin-bottom:20px;}
+.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:640px){.upload-grid{grid-template-columns:1fr;}}
+.drop-zone{border:2px dashed var(--border2);border-radius:14px;padding:20px 16px;text-align:center;cursor:pointer;transition:all .25s;position:relative;background:var(--surface);}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--accent);background:rgba(91,127,255,0.07);}
+.drop-zone.loaded{border-color:var(--up);border-style:solid;}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.dz-icon{font-size:1.7rem;margin-bottom:6px;}
+.dz-title{font-size:.82rem;font-weight:700;color:var(--text);margin-bottom:3px;}
+.dz-sub{font-size:.69rem;color:var(--muted);line-height:1.5;}
+.dz-status{font-size:.72rem;font-weight:600;color:var(--up);margin-top:5px;display:none;}
+.drop-zone.loaded .dz-status{display:block;}
+.drop-zone.loaded .dz-sub{display:none;}
+.run-btn{display:block;width:100%;margin-top:12px;padding:13px;background:linear-gradient(135deg,var(--accent),#7b5fff);border:none;border-radius:12px;color:#fff;font-size:.88rem;font-weight:800;font-family:'Noto Sans KR',sans-serif;cursor:pointer;transition:all .2s;}
+.run-btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(91,127,255,0.35);}
+
+/* SECTIONS */
+.section{display:none;}
+.section.active{display:block;animation:fadeIn .35s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* KPI */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:20px;}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:17px 15px;position:relative;overflow:hidden;transition:all .2s;}
+.kpi:hover{transform:translateY(-2px);border-color:var(--border2);}
+.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--kc,var(--accent));}
+.kpi-label{font-size:.67rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:7px;}
+.kpi-value{font-size:1.5rem;font-weight:900;font-family:'JetBrains Mono',monospace;color:var(--kc,var(--text));line-height:1;}
+.kpi-sub{font-size:.68rem;color:var(--muted);margin-top:5px;}
+.sec-label{font-size:.68rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:2px;margin:22px 0 12px;display:flex;align-items:center;gap:8px;}
+.sec-label::before{content:'';width:3px;height:14px;background:var(--accent);border-radius:2px;}
+.chart-grid{display:grid;gap:13px;margin-bottom:14px;}
+.cg2{grid-template-columns:1fr 1fr;}
+.cg1{grid-template-columns:1fr;}
+@media(max-width:860px){.cg2{grid-template-columns:1fr;}}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:18px;}
+.chart-title{font-size:.8rem;font-weight:700;margin-bottom:13px;color:var(--text);}
+
+/* TABLE */
+.tbl-wrap{background:var(--surface);border:1px solid var(--border);border-radius:13px;overflow:auto;margin-bottom:14px;}
+table{width:100%;border-collapse:collapse;min-width:520px;}
+thead tr{background:var(--surface2);}
+th{padding:10px 13px;font-size:.64rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;white-space:nowrap;text-align:left;}
+td{padding:10px 13px;font-size:.79rem;border-top:1px solid rgba(255,255,255,0.032);}
+tr:hover td{background:rgba(91,127,255,0.04);}
+.mono{font-family:'JetBrains Mono',monospace;font-size:.75rem;}
+.cn{font-weight:600;}
+.bdg{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.68rem;font-weight:700;font-family:'JetBrains Mono',monospace;}
+.b-high{background:rgba(0,223,162,0.13);color:var(--up);}
+.b-mid{background:rgba(255,190,92,0.15);color:var(--warn);}
+.b-low{background:rgba(91,127,255,0.12);color:var(--accent);}
+.b-vlow{background:rgba(255,107,122,0.1);color:var(--down);}
+.b-new{background:rgba(0,223,162,0.15);color:var(--up);border:1px solid rgba(0,223,162,0.3);}
+.up{color:var(--up);font-weight:700;}
+.down{color:var(--down);font-weight:700;}
+.muted{color:var(--muted);}
+.rank{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:.76rem;}
+.r1{color:#FFD700}.r2{color:#C0C0C0}.r3{color:#CD7F32}
+
+/* WEEK TABS */
+.wtabs-wrap{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:14px 16px;margin-bottom:14px;}
+.wtabs-title{font-size:.67rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;}
+.wtabs{display:flex;gap:6px;flex-wrap:wrap;}
+.wtab{background:var(--surface2);border:none;outline:1px solid var(--border);border-radius:8px;padding:6px 13px;font-size:.75rem;font-family:'JetBrains Mono',monospace;color:var(--muted);cursor:pointer;transition:all .2s;}
+.wtab:hover{color:var(--text);background:rgba(91,127,255,0.1);}
+.wtab.active{background:rgba(91,127,255,0.18);color:var(--accent);font-weight:700;outline:1px solid var(--accent);}
+.wtab.is-new{color:var(--up);outline:1px solid rgba(0,223,162,0.4);}
+.wtab.is-new.active{background:rgba(0,223,162,0.12);outline:1px solid var(--up);}
+
+/* WEEK SUMMARY MINI BAR */
+.week-meta{background:var(--surface2);border:1px solid var(--border);border-radius:11px;padding:14px 18px;margin-bottom:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;}
+.week-meta-item .wm-label{font-size:.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;}
+.week-meta-item .wm-value{font-size:.85rem;font-weight:700;font-family:'JetBrains Mono',monospace;}
+
+/* ACTION */
+.action-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin-bottom:14px;}
+.action-card{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:18px;position:relative;overflow:hidden;transition:all .2s;}
+.action-card:hover{transform:translateY(-2px);border-color:var(--border2);}
+.action-card::before{content:'';position:absolute;top:0;left:0;bottom:0;width:3px;background:var(--ac,var(--accent));}
+.ac-priority{font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:var(--ac,var(--accent));margin-bottom:7px;}
+.ac-title{font-size:.9rem;font-weight:800;color:var(--text);margin-bottom:6px;line-height:1.4;}
+.ac-body{font-size:.76rem;color:var(--muted);line-height:1.65;}
+.ac-tag{display:inline-block;margin-top:9px;font-size:.66rem;padding:2px 9px;border-radius:20px;background:rgba(91,127,255,0.1);color:var(--accent);font-weight:600;border:1px solid rgba(91,127,255,0.2);}
+.insight-box{background:var(--surface2);border:1px solid var(--border);border-radius:13px;padding:16px 18px;margin-bottom:14px;}
+.insight-box h4{font-size:.72rem;font-weight:800;color:var(--warn);margin-bottom:9px;text-transform:uppercase;letter-spacing:1px;}
+.insight-list{list-style:none;display:flex;flex-direction:column;gap:6px;}
+.insight-list li{font-size:.78rem;color:var(--muted);line-height:1.6;padding-left:15px;position:relative;}
+.insight-list li::before{content:'→';position:absolute;left:0;color:var(--up);font-weight:700;}
+
+.loading{display:none;text-align:center;padding:50px 20px;}
+.loading.show{display:block;}
+.spinner{width:34px;height:34px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-thumb{background:rgba(91,127,255,0.3);border-radius:2px;}
+</style>
+</head>
+<body>
+<nav>
+  <div class="nav-inner">
+    <div class="logo">🏷️ <span>Weekly</span> Dashboard</div>
+    <button class="ntab active" onclick="showTab('overview',this)">📊 개요</button>
+    <button class="ntab" onclick="showTab('coupon',this)">🎫 쿠폰</button>
+    <button class="ntab" onclick="showTab('points',this)">💎 포인트</button>
+    <button class="ntab" onclick="showTab('weekly',this)">📅 주간 상세</button>
+    <button class="ntab" onclick="showTab('action',this)">🚀 Next Action</button>
+    <div class="nav-right">
+      <span class="period-badge" id="periodBadge">10주 누적</span>
+      <div class="live-dot"></div>
+    </div>
+  </div>
+</nav>
+<div class="container">
+  <div class="upload-section">
+    <div class="upload-grid">
+      <div class="drop-zone" id="dz-coupon" onclick="document.getElementById('fi-coupon').click()">
+        <input type="file" id="fi-coupon" accept=".csv,.xlsx,.xls" onchange="handleFile(event,'coupon')">
+        <div class="dz-icon">🎫</div>
+        <div class="dz-title">신규 쿠폰 데이터 추가</div>
+        <div class="dz-sub">다음 주 CSV/XLSX를 드래그하거나 클릭<br><small>업로드 없이도 10주치 데이터 바로 확인 가능</small></div>
+        <div class="dz-status" id="coupon-status"></div>
+      </div>
+      <div class="drop-zone" id="dz-points" onclick="document.getElementById('fi-points').click()">
+        <input type="file" id="fi-points" accept=".csv,.xlsx,.xls" onchange="handleFile(event,'points')">
+        <div class="dz-icon">💎</div>
+        <div class="dz-title">포인트 데이터 추가/갱신</div>
+        <div class="dz-sub">일별 포인트 CSV/XLSX를 드래그하거나 클릭<br><small>새 파일 업로드 시 자동 갱신</small></div>
+        <div class="dz-status" id="points-status"></div>
+      </div>
+    </div>
+    <button class="run-btn" onclick="applyNewData()">📊 신규 데이터 반영 (없으면 기존 10주 데이터 보기)</button>
+  </div>
+  <div class="loading" id="loadingEl"><div class="spinner"></div><div style="color:var(--muted);font-size:.82rem;">데이터 분석 중...</div></div>
+  <div id="dashboard">
+    <div class="section active" id="tab-overview">
+      <div class="kpi-grid" id="kpiGrid"></div>
+      <div class="sec-label">쿠폰 사용 건수 × 포인트 사용액 주간 트렌드</div>
+      <div class="chart-grid cg1"><div class="chart-card"><div class="chart-title">📈 주간 쿠폰 사용 건수 vs 포인트 사용액</div><canvas id="comboChart" height="110"></canvas></div></div>
+      <div class="chart-grid cg2">
+        <div class="chart-card"><div class="chart-title">🗂️ 카테고리별 거래액</div><canvas id="catChart" height="260"></canvas></div>
+        <div class="chart-card"><div class="chart-title">📅 월별 포인트 사용액</div><canvas id="monthlyChart" height="260"></canvas></div>
+      </div>
+    </div>
+    <div class="section" id="tab-coupon">
+      <div class="sec-label">주간 사용률 트렌드</div>
+      <div class="chart-grid cg2">
+        <div class="chart-card"><div class="chart-title">📈 주간 사용률 추이</div><canvas id="rateChart" height="220"></canvas></div>
+        <div class="chart-card"><div class="chart-title">🛒 주간 사용 건수</div><canvas id="countChart" height="220"></canvas></div>
+      </div>
+      <div class="sec-label">주간 Summary 테이블 (전체 누적)</div>
+      <div class="tbl-wrap"><table><thead><tr><th>기간</th><th>발급 수</th><th>사용 수</th><th>사용률</th><th>할인액</th><th>거래액</th><th>증감률</th><th>메모</th></tr></thead><tbody id="summaryTbody"></tbody></table></div>
+    </div>
+    <div class="section" id="tab-points">
+      <div class="kpi-grid" id="pointsKpi"></div>
+      <div class="sec-label">일별 포인트 사용 추이</div>
+      <div class="chart-grid cg1"><div class="chart-card"><div class="chart-title">📆 일별 포인트 사용액</div><canvas id="dailyChart" height="110"></canvas></div></div>
+      <div class="chart-grid cg2">
+        <div class="chart-card"><div class="chart-title">📅 월별 합계</div><canvas id="mthChart" height="240"></canvas></div>
+        <div class="chart-card"><div class="chart-title">📊 요일별 평균</div><canvas id="dowChart" height="240"></canvas></div>
+      </div>
+    </div>
+    <div class="section" id="tab-weekly">
+      <div class="wtabs-wrap">
+        <div class="wtabs-title" id="wtabsTitle">📅 주차 선택 — 전체 10주 누적</div>
+        <div class="wtabs" id="weekTabs"></div>
+      </div>
+      <div class="week-meta" id="weekMeta"></div>
+      <div class="chart-grid cg2">
+        <div class="chart-card"><div class="chart-title" id="wkBarTitle">사용 건수 TOP 20</div><canvas id="wkBarChart" height="360"></canvas></div>
+        <div class="chart-card"><div class="chart-title" id="wkRateTitle">사용률 TOP 20 (발급 5매 이상)</div><canvas id="wkRateChart" height="360"></canvas></div>
+      </div>
+      <div class="tbl-wrap"><table><thead><tr><th>순위</th><th>쿠폰명</th><th>발급 수</th><th>사용 수</th><th>사용률</th><th>할인액</th><th>거래액</th></tr></thead><tbody id="wkTbody"></tbody></table></div>
+    </div>
+    <div class="section" id="tab-action">
+      <div class="insight-box"><h4>📌 핵심 인사이트</h4><ul class="insight-list" id="insightList"></ul></div>
+      <div class="sec-label">우선순위별 Next Action</div>
+      <div class="action-grid" id="actionGrid"></div>
+    </div>
+  </div>
+</div>
+<script>
+// ══ ALL 10 WEEKS EMBEDDED ══
+const ALL_WEEKS = [{"key": "251231-260106", "label": "12.31~01.06", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 6551, "u": 55, "r": 0.84, "d": 280000, "t": 16344356}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 2797, "u": 45, "r": 1.61, "d": 225000, "t": 12715060}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 4050, "u": 44, "r": 1.09, "d": 460000, "t": 26576676}, {"n": "라스트 우둔살 3% 할인 쿠폰", "i": 2657, "u": 41, "r": 1.54, "d": 398466, "t": 15933047}, {"n": "실버 등급 5,000원 쿠폰", "i": 1997, "u": 40, "r": 2.0, "d": 200000, "t": 15393740}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 2768, "u": 30, "r": 1.08, "d": 930000, "t": 19448026}, {"n": "실버 등급 5,000원 쿠폰", "i": 1996, "u": 30, "r": 1.5, "d": 160000, "t": 8387780}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2094, "u": 27, "r": 1.29, "d": 560000, "t": 15691760}, {"n": "라스트 채끝 3% 할인 쿠폰", "i": 2657, "u": 25, "r": 0.94, "d": 302895, "t": 11434733}, {"n": "라스트 아랫등심 4% 할인 쿠폰", "i": 2657, "u": 21, "r": 0.79, "d": 574870, "t": 14350762}, {"n": "골드 등급 5,000원 쿠폰", "i": 742, "u": 15, "r": 2.02, "d": 80000, "t": 5661680}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 14, "r": 2.83, "d": 70000, "t": 7115710}, {"n": "골드 등급 5,000원 쿠폰", "i": 741, "u": 13, "r": 1.75, "d": 65000, "t": 4140590}, {"n": "골드 등급 5,000원 쿠폰", "i": 740, "u": 13, "r": 1.76, "d": 65000, "t": 3763070}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 310, "u": 13, "r": 4.19, "d": 390000, "t": 3568740}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 495, "u": 13, "r": 2.63, "d": 65000, "t": 3270970}, {"n": "라스트 부채살 3% 할인 쿠폰", "i": 2657, "u": 11, "r": 0.41, "d": 54853, "t": 2265847}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 10, "r": 2.02, "d": 50000, "t": 4515750}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 10, "r": 2.02, "d": 50000, "t": 3058030}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 9, "r": 1.82, "d": 50000, "t": 5467450}]}, {"key": "260107-260112", "label": "01.07~01.12", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 6551, "u": 78, "r": 1.19, "d": 395000, "t": 26566360}, {"n": "실버 등급 5,000원 쿠폰", "i": 1997, "u": 71, "r": 3.56, "d": 370000, "t": 25293240}, {"n": "실버 등급 5,000원 쿠폰", "i": 1996, "u": 70, "r": 3.51, "d": 350000, "t": 30505890}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 4050, "u": 62, "r": 1.53, "d": 640000, "t": 26813220}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 2797, "u": 57, "r": 2.04, "d": 285000, "t": 20808108}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 2768, "u": 47, "r": 1.7, "d": 1410000, "t": 36143310}, {"n": "실버 등급 3,000원 쿠폰", "i": 1580, "u": 41, "r": 2.59, "d": 129000, "t": 13822230}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2094, "u": 38, "r": 1.81, "d": 760000, "t": 20628320}, {"n": "골드 등급 5,000원 쿠폰", "i": 741, "u": 33, "r": 4.45, "d": 170000, "t": 13520550}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 310, "u": 33, "r": 10.65, "d": 990000, "t": 8375560}, {"n": "골드 등급 5,000원 쿠폰", "i": 740, "u": 24, "r": 3.24, "d": 135000, "t": 8770360}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 23, "r": 4.66, "d": 115000, "t": 7641980}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 23, "r": 4.66, "d": 115000, "t": 7437340}, {"n": "26년 첫 20,000원 쿠폰", "i": 303, "u": 20, "r": 6.6, "d": 420000, "t": 20559690}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 20, "r": 4.05, "d": 100000, "t": 11974710}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 20, "r": 4.05, "d": 100000, "t": 9735270}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 494, "u": 20, "r": 4.05, "d": 105000, "t": 5766150}, {"n": "골드 등급 5,000원 쿠폰", "i": 742, "u": 20, "r": 2.7, "d": 100000, "t": 4806760}, {"n": "26년 첫 10,000원 쿠폰", "i": 307, "u": 18, "r": 5.86, "d": 180000, "t": 13223300}, {"n": "26년 첫 10,000원 쿠폰", "i": 307, "u": 18, "r": 5.86, "d": 180000, "t": 11363810}]}, {"key": "260114-260120", "label": "01.14~01.20", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 6551, "u": 93, "r": 1.42, "d": 475000, "t": 36294116}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 2768, "u": 78, "r": 2.82, "d": 2430000, "t": 59981580}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 4050, "u": 63, "r": 1.56, "d": 650000, "t": 34256650}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 310, "u": 40, "r": 12.9, "d": 1260000, "t": 16806640}, {"n": "실버 등급 3,000원 쿠폰", "i": 1580, "u": 35, "r": 2.22, "d": 108000, "t": 12535780}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2094, "u": 33, "r": 1.58, "d": 760000, "t": 25829470}, {"n": "실버 등급 5,000원 쿠폰", "i": 1996, "u": 28, "r": 1.4, "d": 140000, "t": 13218010}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 2797, "u": 25, "r": 0.89, "d": 125000, "t": 8668340}, {"n": "1월 리턴 5.000 쿠폰", "i": 202, "u": 23, "r": 11.39, "d": 115000, "t": 9928630}, {"n": "26년 첫 5,000원 쿠폰", "i": 307, "u": 21, "r": 6.84, "d": 110000, "t": 14188280}, {"n": "26년 첫 5,000원 쿠폰", "i": 307, "u": 21, "r": 6.84, "d": 105000, "t": 9693360}, {"n": "1월 스페셜 5,000원 쿠폰", "i": 84, "u": 20, "r": 23.81, "d": 100000, "t": 6721400}, {"n": "26년 첫 10,000원 쿠폰", "i": 307, "u": 18, "r": 5.86, "d": 180000, "t": 16760890}, {"n": "골드 등급 5,000원 쿠폰", "i": 742, "u": 18, "r": 2.43, "d": 90000, "t": 8066940}, {"n": "실버 등급 5,000원 쿠폰", "i": 1997, "u": 18, "r": 0.9, "d": 90000, "t": 12764670}, {"n": "1월 단골 전용 30,000원 쿠폰", "i": 64, "u": 16, "r": 25.0, "d": 480000, "t": 17136130}, {"n": "마케팅 수신동의 10,000원 쿠폰", "i": 4380, "u": 16, "r": 0.37, "d": 160000, "t": 5983120}, {"n": "26년 첫 10,000원 쿠폰", "i": 307, "u": 15, "r": 4.89, "d": 160000, "t": 13723290}, {"n": "골드 등급 5,000원 쿠폰", "i": 740, "u": 15, "r": 2.03, "d": 75000, "t": 7515370}, {"n": "26년 첫 20,000원 쿠폰", "i": 303, "u": 14, "r": 4.62, "d": 280000, "t": 16757780}]}, {"key": "260121-260127", "label": "01.21~01.27", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 6881, "u": 89, "r": 1.29, "d": 455000, "t": 31953305}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 4310, "u": 78, "r": 1.81, "d": 780000, "t": 37081580}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 2926, "u": 59, "r": 2.02, "d": 1800000, "t": 40996260}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2223, "u": 43, "r": 1.93, "d": 880000, "t": 30582830}, {"n": "1월 설 준비  30,000원 쿠폰", "i": 218, "u": 34, "r": 15.6, "d": 1050000, "t": 27554300}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 411, "u": 33, "r": 8.03, "d": 1050000, "t": 9856610}, {"n": "스페셜 윗등심 2% 할인 쿠폰", "i": 2265, "u": 26, "r": 1.15, "d": 575197, "t": 32569003}, {"n": "진성한우 상품 2% 할인 쿠폰", "i": 2261, "u": 23, "r": 1.02, "d": 210806, "t": 19603514}, {"n": "실버 등급 3,000원 쿠폰", "i": 1580, "u": 18, "r": 1.14, "d": 54000, "t": 6748120}, {"n": "1월 스페셜 5,000원 쿠폰", "i": 84, "u": 17, "r": 20.24, "d": 85000, "t": 4441760}, {"n": "26년 첫 10,000원 쿠폰", "i": 367, "u": 17, "r": 4.63, "d": 180000, "t": 10743960}, {"n": "26년 첫 5,000원 쿠폰", "i": 367, "u": 17, "r": 4.63, "d": 95000, "t": 8406310}, {"n": "스페셜 아랫등심 2% 할인 쿠폰", "i": 2265, "u": 16, "r": 0.71, "d": 266812, "t": 16535608}, {"n": "26년 첫 10,000원 쿠폰", "i": 367, "u": 14, "r": 3.81, "d": 140000, "t": 7990244}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 2797, "u": 14, "r": 0.5, "d": 70000, "t": 5555720}, {"n": "26년 첫 5,000원 쿠폰", "i": 367, "u": 13, "r": 3.54, "d": 75000, "t": 5527040}, {"n": "스페셜 등심 2% 할인 쿠폰", "i": 2265, "u": 13, "r": 0.57, "d": 463908, "t": 23935772}, {"n": "26년 첫 30,000원 쿠폰", "i": 367, "u": 11, "r": 3.0, "d": 360000, "t": 19601800}, {"n": "실버 등급 5,000원 쿠폰", "i": 1997, "u": 11, "r": 0.55, "d": 55000, "t": 4987170}, {"n": "VIP 등급 3,000원 쿠폰", "i": 242, "u": 10, "r": 4.13, "d": 30000, "t": 5878290}]}, {"key": "260128-260203", "label": "01.28~02.03", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 7248, "u": 91, "r": 1.26, "d": 455000, "t": 32750180}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 3005, "u": 75, "r": 2.5, "d": 2280000, "t": 60770800}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 4553, "u": 67, "r": 1.47, "d": 680000, "t": 27942100}, {"n": "한 번 더! 20,000원 쿠폰", "i": 181, "u": 50, "r": 27.62, "d": 1020000, "t": 17189760}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2366, "u": 50, "r": 2.11, "d": 1100000, "t": 31599810}, {"n": "초강력 우둔살 2% 할인 쿠폰", "i": 2275, "u": 42, "r": 1.85, "d": 588540, "t": 40538720}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 522, "u": 38, "r": 7.28, "d": 1140000, "t": 18584290}, {"n": "초강력 안창살 3% 할인 쿠폰", "i": 2275, "u": 35, "r": 1.54, "d": 298205, "t": 13674116}, {"n": "초강력 윗등심 2% 할인 쿠폰", "i": 2275, "u": 33, "r": 1.45, "d": 982948, "t": 59679573}, {"n": "초강력 아랫등심 2% 할인 쿠폰", "i": 2276, "u": 21, "r": 0.92, "d": 369537, "t": 23108263}, {"n": "실버 등급 5,000원 쿠폰", "i": 2180, "u": 20, "r": 0.92, "d": 100000, "t": 5806430}, {"n": "초강력 홍두깨살 2% 할인 쿠폰", "i": 2275, "u": 20, "r": 0.88, "d": 103033, "t": 7122067}, {"n": "1월 설 준비  30,000원 쿠폰", "i": 218, "u": 19, "r": 8.72, "d": 570000, "t": 13564480}, {"n": "실버 등급 5,000원 쿠폰", "i": 2181, "u": 18, "r": 0.83, "d": 90000, "t": 5015470}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 3001, "u": 18, "r": 0.6, "d": 90000, "t": 4513840}, {"n": "한 번 더! 10,000원 쿠폰", "i": 91, "u": 17, "r": 18.68, "d": 170000, "t": 5349650}, {"n": "특별 10,000원 쿠폰", "i": 227, "u": 16, "r": 7.05, "d": 170000, "t": 6714980}, {"n": "초강력 등심 2% 할인 쿠폰", "i": 2275, "u": 16, "r": 0.7, "d": 571397, "t": 34072281}, {"n": "26년 첫 5,000원 쿠폰", "i": 389, "u": 15, "r": 3.86, "d": 75000, "t": 5983920}, {"n": "26년 첫 5,000원 쿠폰", "i": 389, "u": 15, "r": 3.86, "d": 80000, "t": 5925720}]}, {"key": "260204-260210", "label": "02.04~02.10", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 7625, "u": 99, "r": 1.3, "d": 540000, "t": 36489330}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 4798, "u": 86, "r": 1.79, "d": 890000, "t": 37121240}, {"n": "실버 등급 5,000원 쿠폰", "i": 2181, "u": 79, "r": 3.62, "d": 410000, "t": 31855860}, {"n": "실버 등급 5,000원 쿠폰", "i": 2180, "u": 74, "r": 3.39, "d": 385000, "t": 28916340}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 3001, "u": 69, "r": 2.3, "d": 350000, "t": 19467930}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2507, "u": 59, "r": 2.35, "d": 1220000, "t": 37334060}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 3165, "u": 59, "r": 1.86, "d": 1830000, "t": 45848950}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 636, "u": 53, "r": 8.33, "d": 1590000, "t": 18547290}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 495, "u": 50, "r": 10.1, "d": 570000, "t": 36246340}, {"n": "2월 설 장바구니 5,000원 쿠폰", "i": 495, "u": 49, "r": 9.9, "d": 250000, "t": 18635510}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 495, "u": 42, "r": 8.48, "d": 450000, "t": 29542250}, {"n": "초강력 아랫등심 2% 할인 쿠폰", "i": 2276, "u": 38, "r": 1.67, "d": 834959, "t": 50472731}, {"n": "초강력 채끝 2% 할인 쿠폰", "i": 2294, "u": 38, "r": 1.66, "d": 461066, "t": 30005128}, {"n": "2월 설 장바구니 20,000원 쿠폰", "i": 495, "u": 37, "r": 7.47, "d": 760000, "t": 38891280}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 571, "u": 36, "r": 6.3, "d": 245000, "t": 24256120}, {"n": "2월 설 장바구니 30,000원 쿠폰", "i": 495, "u": 35, "r": 7.07, "d": 1140000, "t": 61503280}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 571, "u": 35, "r": 6.13, "d": 180000, "t": 10466440}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 572, "u": 33, "r": 5.77, "d": 195000, "t": 17391530}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 571, "u": 32, "r": 5.6, "d": 170000, "t": 14790950}, {"n": "골드 등급 5,000원 쿠폰", "i": 819, "u": 31, "r": 3.79, "d": 155000, "t": 11335070}]}, {"key": "260211-260217", "label": "02.11~02.17", "coupons": [{"n": "2월 단골 전용 30,000원 쿠폰", "i": 389, "u": 60, "r": 15.42, "d": 1800000, "t": 68960000}, {"n": "출석왕 성공 5,000원 쿠폰", "i": 8102, "u": 51, "r": 0.63, "d": 260000, "t": 15844690}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 5135, "u": 39, "r": 0.76, "d": 410000, "t": 17173290}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 3170, "u": 33, "r": 1.04, "d": 990000, "t": 25154310}, {"n": "2월 설 장바구니 5,000원 쿠폰", "i": 585, "u": 31, "r": 5.3, "d": 160000, "t": 11914080}, {"n": "신규 전용 30,000원 할인 쿠폰", "i": 718, "u": 28, "r": 3.9, "d": 840000, "t": 8913290}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 585, "u": 26, "r": 4.44, "d": 280000, "t": 17911410}, {"n": "실버 등급 5,000원 쿠폰", "i": 2180, "u": 26, "r": 1.19, "d": 130000, "t": 11027148}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2693, "u": 25, "r": 0.93, "d": 540000, "t": 13469210}, {"n": "2월 단골 전용 50,000원 쿠폰", "i": 111, "u": 22, "r": 19.82, "d": 1250000, "t": 37491440}, {"n": "초강력 채끝 2% 할인 쿠폰", "i": 2294, "u": 22, "r": 0.96, "d": 220218, "t": 10553973}, {"n": "실버 등급 5,000원 쿠폰", "i": 2181, "u": 22, "r": 1.01, "d": 110000, "t": 7772460}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 585, "u": 21, "r": 3.59, "d": 210000, "t": 13590100}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 3001, "u": 21, "r": 0.7, "d": 110000, "t": 6698050}, {"n": "실버 등급 3,000원 쿠폰", "i": 1764, "u": 16, "r": 0.91, "d": 48000, "t": 5808720}, {"n": "초특급 등심 2% 할인 쿠폰", "i": 300, "u": 13, "r": 4.33, "d": 351107, "t": 18481093}, {"n": "초특급 아랫등심 2% 할인 쿠폰", "i": 347, "u": 13, "r": 3.75, "d": 236395, "t": 14650415}, {"n": "2월 설 장바구니 20,000원 쿠폰", "i": 585, "u": 13, "r": 2.22, "d": 260000, "t": 13752340}, {"n": "2월 설 장바구니 20,000원 쿠폰", "i": 585, "u": 13, "r": 2.22, "d": 260000, "t": 12289050}, {"n": "VVIP 등급 3,000원 쿠폰", "i": 461, "u": 13, "r": 2.82, "d": 39000, "t": 3842770}]}, {"key": "260218-260224", "label": "02.18~02.24", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 8151, "u": 29, "r": 0.36, "d": 150000, "t": 8393780}, {"n": "2월 설 장바구니 5,000원 쿠폰", "i": 589, "u": 28, "r": 4.75, "d": 155000, "t": 11207840}, {"n": "2월 단골 전용 30,000원 쿠폰", "i": 389, "u": 17, "r": 4.37, "d": 720000, "t": 26856580}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 3001, "u": 17, "r": 0.57, "d": 85000, "t": 8086213}, {"n": "특별 10,000원 쿠폰", "i": 227, "u": 14, "r": 6.17, "d": 160000, "t": 7863350}, {"n": "실버 등급 5,000원 쿠폰", "i": 2180, "u": 14, "r": 0.64, "d": 70000, "t": 5751060}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2706, "u": 13, "r": 0.48, "d": 260000, "t": 6402790}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 5155, "u": 10, "r": 0.19, "d": 160000, "t": 6680038}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 589, "u": 10, "r": 1.7, "d": 100000, "t": 5476392}, {"n": "실버 등급 3,000원 쿠폰", "i": 1764, "u": 10, "r": 0.57, "d": 30000, "t": 3021040}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 589, "u": 8, "r": 1.36, "d": 80000, "t": 5539793}, {"n": "신규가입  20,000원 할인 쿠폰", "i": 39, "u": 8, "r": 20.51, "d": 180000, "t": 4543060}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 571, "u": 7, "r": 1.23, "d": 35000, "t": 3232007}, {"n": "실버 등급 5,000원 쿠폰", "i": 2181, "u": 7, "r": 0.32, "d": 35000, "t": 3161270}, {"n": "한 번 더! 20,000원 쿠폰", "i": 181, "u": 7, "r": 3.87, "d": 140000, "t": 1561980}, {"n": "2월 설 장바구니 30,000원 쿠폰", "i": 589, "u": 6, "r": 1.02, "d": 180000, "t": 8574080}, {"n": "VVIP 등급 3,000원 쿠폰", "i": 461, "u": 6, "r": 1.3, "d": 18000, "t": 2575910}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 571, "u": 6, "r": 1.05, "d": 35000, "t": 1274741}, {"n": "2월 설 장바구니 20,000원 쿠폰", "i": 589, "u": 5, "r": 0.85, "d": 120000, "t": 5104160}, {"n": "VIP 등급 5,000원 쿠폰", "i": 376, "u": 5, "r": 1.33, "d": 25000, "t": 3123260}]}, {"key": "260225-260303", "label": "02.25~03.03", "coupons": [{"n": "출석왕 성공 5,000원 쿠폰", "i": 8465, "u": 93, "r": 1.1, "d": 470000, "t": 28759314}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 5360, "u": 64, "r": 1.19, "d": 760000, "t": 35624007}, {"n": "브론즈 등급 5,000원 쿠폰", "i": 3232, "u": 45, "r": 1.39, "d": 230000, "t": 11474080}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2840, "u": 37, "r": 1.3, "d": 780000, "t": 21569870}, {"n": "실버 등급 5,000원 쿠폰", "i": 2356, "u": 36, "r": 1.53, "d": 180000, "t": 12852650}, {"n": "2월 설 장바구니 5,000원 쿠폰", "i": 612, "u": 31, "r": 5.07, "d": 155000, "t": 11304750}, {"n": "2월 단골 전용 30,000원 쿠폰", "i": 389, "u": 28, "r": 7.2, "d": 840000, "t": 29322348}, {"n": "신규가입  20,000원 할인 쿠폰", "i": 115, "u": 27, "r": 23.48, "d": 560000, "t": 7260850}, {"n": "실버 등급 3,000원 쿠폰", "i": 1939, "u": 25, "r": 1.29, "d": 75000, "t": 7160250}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 612, "u": 24, "r": 3.92, "d": 240000, "t": 14570130}, {"n": "실버 등급 5,000원 쿠폰", "i": 2355, "u": 19, "r": 0.81, "d": 95000, "t": 11106630}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 624, "u": 16, "r": 2.56, "d": 80000, "t": 15400702}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 624, "u": 16, "r": 2.56, "d": 95000, "t": 6972360}, {"n": "2월 설 장바구니 10,000원 쿠폰", "i": 612, "u": 15, "r": 2.45, "d": 150000, "t": 8604890}, {"n": "VIP 등급 5,000원 쿠폰", "i": 411, "u": 13, "r": 3.16, "d": 70000, "t": 5597151}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 624, "u": 13, "r": 2.08, "d": 65000, "t": 3877060}, {"n": "VIP 등급 5,000원 쿠폰", "i": 412, "u": 12, "r": 2.91, "d": 60000, "t": 4952727}, {"n": "2월 설 장바구니 30,000원 쿠폰", "i": 612, "u": 11, "r": 1.8, "d": 330000, "t": 19022360}, {"n": "2월 설 장바구니 20,000원 쿠폰", "i": 612, "u": 11, "r": 1.8, "d": 220000, "t": 15862480}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 625, "u": 11, "r": 1.76, "d": 55000, "t": 10052857}]}, {"key": "260304-260310", "label": "03.04~03.10", "coupons": [{"n": "브론즈 등급 5,000원 쿠폰", "i": 3232, "u": 71, "r": 2.2, "d": 355000, "t": 24672980}, {"n": "실버 등급 5,000원 쿠폰", "i": 2355, "u": 60, "r": 2.55, "d": 305000, "t": 19587150}, {"n": "출석왕 성공 5,000원 쿠폰", "i": 8823, "u": 57, "r": 0.65, "d": 300000, "t": 19757110}, {"n": "출석왕 성공 10,000원 쿠폰", "i": 5595, "u": 55, "r": 0.98, "d": 620000, "t": 26145940}, {"n": "실버 등급 5,000원 쿠폰", "i": 2356, "u": 50, "r": 2.12, "d": 260000, "t": 18211065}, {"n": "본대로 파트너 30,000원 쿠폰", "i": 3341, "u": 42, "r": 1.26, "d": 1290000, "t": 33861320}, {"n": "골드 등급 5,000원 쿠폰", "i": 901, "u": 37, "r": 4.11, "d": 185000, "t": 15684140}, {"n": "골드 등급 5,000원 쿠폰", "i": 900, "u": 37, "r": 4.11, "d": 185000, "t": 9428739}, {"n": "신규가입  20,000원 할인 쿠폰", "i": 209, "u": 34, "r": 16.27, "d": 680000, "t": 8256910}, {"n": "골드 등급 5,000원 쿠폰", "i": 899, "u": 31, "r": 3.45, "d": 155000, "t": 11530927}, {"n": "출석왕 성공 20,000원 쿠폰", "i": 2953, "u": 29, "r": 0.98, "d": 680000, "t": 16661360}, {"n": "3월 실속 챙김 10,000원  쿠폰", "i": 309, "u": 21, "r": 6.8, "d": 210000, "t": 12964200}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 624, "u": 20, "r": 3.21, "d": 100000, "t": 9757130}, {"n": "사장님 전용 10,000원 쿠폰", "i": 270, "u": 20, "r": 7.41, "d": 210000, "t": 8990020}, {"n": "3월 실속 챙김 5,000원  쿠폰", "i": 309, "u": 20, "r": 6.47, "d": 100000, "t": 5489670}, {"n": "실버 등급 3,000원 쿠폰", "i": 1939, "u": 20, "r": 1.03, "d": 60000, "t": 4902040}, {"n": "3월 실속 챙김 10,000원  쿠폰", "i": 309, "u": 19, "r": 6.15, "d": 210000, "t": 10251170}, {"n": "VVIP 등급 5,000원 쿠폰", "i": 624, "u": 19, "r": 3.04, "d": 100000, "t": 10166160}, {"n": "첫 구매 20,000원 할인 쿠폰", "i": 114, "u": 18, "r": 15.79, "d": 360000, "t": 14415590}, {"n": "3월 실속 챙김 5,000원  쿠폰", "i": 309, "u": 18, "r": 5.83, "d": 90000, "t": 6371610}], "isNew": true}];
+
+const SUMMARY = [
+  {p:'25.12.31~26.01.06',issued:634179,used:624, rate:0.098395,disc:7114247,  txn:279149494, ch:null,  memo:'1월 첫째주 등급 쿠폰 발급, 사용률 증가'},
+  {p:'26.01.07~26.01.12',issued:634179,used:991, rate:0.156265,disc:9741239,  txn:473335056, ch:58.8,  memo:'고객 관리 전용 쿠폰 발급 진행'},
+  {p:'26.01.14~26.01.20',issued:634179,used:852, rate:0.134347,disc:10681000, txn:514061808, ch:-14.0, memo:'단골 전용 쿠폰 사용률 높음'},
+  {p:'26.01.21~26.01.27',issued:658378,used:750, rate:0.113916,disc:10703255, txn:471349208, ch:-15.2, memo:'1월 고객 관리 쿠폰들 사용률 높음'},
+  {p:'26.01.28~26.02.03',issued:666215,used:954, rate:0.143197,disc:15070414, txn:642553253, ch:25.7,  memo:'리텐션 고객 전용 쿠폰 사용률 높음'},
+  {p:'26.02.04~26.02.10',issued:670154,used:1608,rate:0.239945,disc:21991935, txn:1028659046,ch:67.6,  memo:'세그먼트·채끝·등심 쿠폰 발급으로 사용률 급증'},
+  {p:'26.02.11~26.02.17',issued:674578,used:705, rate:0.104510,disc:10658882, txn:447982910, ch:-56.4, memo:'설 연휴(14~18일) 구매자 감소'},
+  {p:'26.02.18~26.02.24',issued:674696,used:309, rate:0.045798,disc:3814155,  txn:170516294, ch:-56.2, memo:'설 연휴·경매 휴무 재고 부족'},
+  {p:'26.02.25~26.03.03',issued:678020,used:745, rate:0.109879,disc:7666000,  txn:382156455, ch:139.9, memo:'신규 회원가입 쿠폰 증가 / 쿠폰북 사용량 ↑'},
+  {p:'26.03.04~26.03.10',issued:681816,used:893, rate:0.130974,disc:9253000,  txn:428833409, ch:19.9,  memo:'3월 실속 챙김·신규가입·사장님 전용 쿠폰 활성화',isNew:true},
+];
+
+const POINTS_WEEKLY = [
+  {p:'25.12.31~26.01.06',pts:6391031},{p:'26.01.07~26.01.12',pts:4796640},
+  {p:'26.01.14~26.01.20',pts:2064833},{p:'26.01.21~26.01.27',pts:1947834},
+  {p:'26.01.28~26.02.03',pts:6116271},{p:'26.02.04~26.02.10',pts:5719484},
+  {p:'26.02.11~26.02.17',pts:2546343},{p:'26.02.18~26.02.24',pts:6034602},
+  {p:'26.02.25~26.03.03',pts:19000471},{p:'26.03.04~26.03.10',pts:8341532},
+];
+
+const DAILY_POINTS = [
+  {d:'2025-09-12',v:410533},{d:'2025-09-13',v:79600},{d:'2025-09-14',v:89700},
+  {d:'2025-09-15',v:1340400},{d:'2025-09-16',v:1186000},{d:'2025-09-17',v:684380},{d:'2025-09-18',v:512164},{d:'2025-09-19',v:408155},{d:'2025-09-20',v:355130},{d:'2025-09-21',v:129300},
+  {d:'2025-09-22',v:1307552},{d:'2025-09-23',v:427841},{d:'2025-09-24',v:705222},{d:'2025-09-25',v:796104},{d:'2025-09-26',v:587350},{d:'2025-09-27',v:354700},{d:'2025-09-28',v:229640},
+  {d:'2025-09-29',v:656640},{d:'2025-09-30',v:1118096},
+  {d:'2025-10-01',v:877152},{d:'2025-10-02',v:1456270},{d:'2025-10-03',v:657417},{d:'2025-10-04',v:2700},{d:'2025-10-05',v:25700},{d:'2025-10-06',v:13200},{d:'2025-10-07',v:26900},{d:'2025-10-08',v:60000},{d:'2025-10-09',v:75250},{d:'2025-10-10',v:177570},{d:'2025-10-11',v:6900},{d:'2025-10-12',v:8500},{d:'2025-10-13',v:135776},{d:'2025-10-14',v:505609},{d:'2025-10-15',v:1549254},{d:'2025-10-16',v:652779},{d:'2025-10-17',v:445545},{d:'2025-10-18',v:41400},{d:'2025-10-19',v:2103950},{d:'2025-10-20',v:246203},{d:'2025-10-21',v:325999},{d:'2025-10-22',v:154647},{d:'2025-10-23',v:435860},{d:'2025-10-24',v:119060},{d:'2025-10-25',v:54700},{d:'2025-10-26',v:37900},{d:'2025-10-27',v:750489},{d:'2025-10-28',v:1215493},{d:'2025-10-29',v:486100},{d:'2025-10-30',v:537960},{d:'2025-10-31',v:346246},
+  {d:'2025-11-01',v:1278250},{d:'2025-11-02',v:57000},{d:'2025-11-03',v:446595},{d:'2025-11-04',v:117740},{d:'2025-11-05',v:388976},{d:'2025-11-06',v:2704719},{d:'2025-11-07',v:152928},{d:'2025-11-08',v:37150},{d:'2025-11-09',v:79820},{d:'2025-11-10',v:120700},{d:'2025-11-11',v:97430},{d:'2025-11-12',v:98080},{d:'2025-11-13',v:194050},{d:'2025-11-14',v:262460},{d:'2025-11-15',v:44660},{d:'2025-11-16',v:38840},{d:'2025-11-17',v:119100},{d:'2025-11-18',v:91500},{d:'2025-11-19',v:107450},{d:'2025-11-20',v:145318},{d:'2025-11-21',v:119000},{d:'2025-11-22',v:22200},{d:'2025-11-23',v:39540},{d:'2025-11-24',v:84500},{d:'2025-11-25',v:93070},{d:'2025-11-26',v:159930},{d:'2025-11-27',v:192794},{d:'2025-11-28',v:154288},{d:'2025-11-29',v:13650},{d:'2025-11-30',v:42216},
+  {d:'2025-12-01',v:135857},{d:'2025-12-02',v:173513},{d:'2025-12-03',v:116910},{d:'2025-12-04',v:765455},{d:'2025-12-05',v:965130},{d:'2025-12-06',v:752000},{d:'2025-12-07',v:822960},{d:'2025-12-08',v:1289707},{d:'2025-12-09',v:619180},{d:'2025-12-10',v:706740},{d:'2025-12-11',v:771065},{d:'2025-12-12',v:434600},{d:'2025-12-13',v:120900},{d:'2025-12-14',v:106900},{d:'2025-12-15',v:672100},{d:'2025-12-16',v:887364},{d:'2025-12-17',v:363710},{d:'2025-12-18',v:230150},{d:'2025-12-19',v:332320},{d:'2025-12-20',v:47900},{d:'2025-12-21',v:101400},{d:'2025-12-22',v:398220},{d:'2025-12-23',v:321940},{d:'2025-12-24',v:189700},{d:'2025-12-25',v:280392},{d:'2025-12-26',v:396840},{d:'2025-12-27',v:439350},{d:'2025-12-28',v:101140},{d:'2025-12-29',v:594827},{d:'2025-12-30',v:288984},{d:'2025-12-31',v:153828},
+  {d:'2026-01-01',v:63377},{d:'2026-01-02',v:247606},{d:'2026-01-03',v:34950},{d:'2026-01-04',v:38600},{d:'2026-01-05',v:5110370},{d:'2026-01-06',v:742300},{d:'2026-01-07',v:1447305},{d:'2026-01-08',v:2047613},{d:'2026-01-09',v:513392},{d:'2026-01-10',v:29300},{d:'2026-01-11',v:152320},{d:'2026-01-12',v:606710},{d:'2026-01-13',v:479290},{d:'2026-01-14',v:404916},{d:'2026-01-15',v:546850},{d:'2026-01-16',v:347195},{d:'2026-01-17',v:84400},{d:'2026-01-18',v:77388},{d:'2026-01-19',v:243560},{d:'2026-01-20',v:360524},{d:'2026-01-21',v:257797},{d:'2026-01-22',v:437100},{d:'2026-01-23',v:226632},{d:'2026-01-24',v:113150},{d:'2026-01-25',v:60900},{d:'2026-01-26',v:502650},{d:'2026-01-27',v:349605},{d:'2026-01-28',v:266085},{d:'2026-01-29',v:307690},{d:'2026-01-30',v:348208},{d:'2026-01-31',v:170540},
+  {d:'2026-02-01',v:268800},{d:'2026-02-02',v:2722478},{d:'2026-02-03',v:2032470},{d:'2026-02-04',v:1623345},{d:'2026-02-05',v:966100},{d:'2026-02-06',v:1045158},{d:'2026-02-07',v:508864},{d:'2026-02-08',v:303703},{d:'2026-02-09',v:541290},{d:'2026-02-10',v:731024},{d:'2026-02-11',v:713522},{d:'2026-02-12',v:1160159},{d:'2026-02-13',v:338502},{d:'2026-02-14',v:87400},{d:'2026-02-15',v:31400},{d:'2026-02-16',v:66100},{d:'2026-02-17',v:149260},{d:'2026-02-18',v:68600},{d:'2026-02-19',v:1342415},{d:'2026-02-20',v:2154189},{d:'2026-02-21',v:192200},{d:'2026-02-22',v:674477},{d:'2026-02-23',v:752777},{d:'2026-02-24',v:849944},{d:'2026-02-25',v:8964031},{d:'2026-02-26',v:3183755},{d:'2026-02-27',v:735689},{d:'2026-02-28',v:1421453},
+  {d:'2026-03-01',v:576480},{d:'2026-03-02',v:158700},{d:'2026-03-03',v:3960363},{d:'2026-03-04',v:2492900},{d:'2026-03-05',v:2233560},{d:'2026-03-06',v:1749171},{d:'2026-03-07',v:121400},{d:'2026-03-08',v:464726},{d:'2026-03-09',v:905347},{d:'2026-03-10',v:374428},{d:'2026-03-11',v:88900},
+];
+
+// ══ STATE ══
+let activeWeeks = ALL_WEEKS;
+let activeSummary = SUMMARY;
+let activeDailyPoints = DAILY_POINTS;
+let currentWeekIdx = ALL_WEEKS.length - 1;
+let charts = {};
+let newCouponData = null, newPointsData = null;
+
+Chart.defaults.color = '#6b72a8';
+Chart.defaults.borderColor = 'rgba(100,130,255,0.08)';
+const C = ['#5b7fff','#00dfa2','#ffbe5c','#ff6b7a','#c77dff','#38c7f7','#ff9e6b','#a8ff78','#f7b731','#fd9644','#e056fd','#45aaf2','#26de81','#fd9644','#a55eea','#ff6b6b','#70a1ff','#7bed9f','#ffa502','#eccc68'];
+
+function fmt(n) {
+  if(n>=1e8) return (n/1e8).toFixed(1)+'억';
+  if(n>=1e6) return (n/1e6).toFixed(1)+'M';
+  if(n>=1e4) return (n/1e4).toFixed(0)+'만';
+  return n.toLocaleString();
+}
+function catOf(name) {
+  if(name.includes('출석왕')) return '출석왕';
+  if(name.match(/등급|VVIP|VIP|골드|실버|브론즈/)) return '등급 쿠폰';
+  if(name.match(/신규|회원가입|첫 구매|첫구매|첫 가입/)) return '신규/첫구매';
+  if(name.match(/단골|리텐션|리턴/)) return '단골/리텐션';
+  if(name.match(/설|장바구니/)) return '설/장바구니';
+  if(name.match(/파트너|본대로/)) return '파트너';
+  if(name.match(/사장님/)) return '사장님 전용';
+  if(name.match(/실속|스페셜|챙김|시크릿|특별|기프트/)) return '이벤트';
+  return '기타';
+}
+function dc(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function showTab(id, btn) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.ntab').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  btn.classList.add('active');
+  // Render charts that need visible canvas
+  if (id === 'weekly') renderWeek(currentWeekIdx);
+  if (id === 'points') buildPoints();
+  if (id === 'coupon') buildCoupon();
+}
+
+// ══ FILE HANDLING ══
+function handleFile(e, type) {
+  const file = e.target.files[0]; if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'csv') {
+    Papa.parse(file, { header:true, skipEmptyLines:true, complete: r => storeData(type, r.data, file.name) });
+  } else {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const wb = XLSX.read(ev.target.result, {type:'array'});
+      storeData(type, XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]), file.name);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function storeData(type, rows, fname) {
+  if (type === 'coupon') {
+    newCouponData = rows.map(r => ({
+      n:(r['쿠폰이름']||'').toString().trim(), i:+r['발급된수']||0,
+      u:+r['사용된수']||0, r:+r['사용률']||0,
+      d:+r['사용된쿠폰총금액']||0, t:+r['총쿠폰사용거래액']||0
+    })).filter(r => r.n);
+    document.getElementById('dz-coupon').classList.add('loaded');
+    document.getElementById('coupon-status').textContent = '✅ ' + newCouponData.length + '개 쿠폰 로드 (' + fname + ')';
+  } else {
+    newPointsData = rows.map(r => ({d:r['포인트사용날짜']||'', v:+r['총사용된포인트금액']||0})).filter(r=>r.d).sort((a,b)=>a.d.localeCompare(b.d));
+    document.getElementById('dz-points').classList.add('loaded');
+    document.getElementById('points-status').textContent = '✅ ' + newPointsData.length + '일 로드 (' + fname + ')';
+  }
+}
+
+['dz-coupon','dz-points'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); el.classList.remove('drag-over');
+    const type = id === 'dz-coupon' ? 'coupon' : 'points';
+    const inp = document.getElementById(type === 'coupon' ? 'fi-coupon' : 'fi-points');
+    const dt = new DataTransfer(); dt.items.add(e.dataTransfer.files[0]);
+    inp.files = dt.files;
+    handleFile({target:{files:[e.dataTransfer.files[0]]}}, type);
+  });
+});
+
+// ══ APPLY NEW DATA ══
+function applyNewData() {
+  document.getElementById('loadingEl').classList.add('show');
+  setTimeout(() => {
+    if (newCouponData) {
+      const ti = newCouponData.reduce((s,c)=>s+c.i,0);
+      const tu = newCouponData.reduce((s,c)=>s+c.u,0);
+      const td = newCouponData.reduce((s,c)=>s+c.d,0);
+      const tt = newCouponData.reduce((s,c)=>s+c.t,0);
+      const nr = ti>0 ? tu/ti : 0;
+      const last = SUMMARY[SUMMARY.length-1];
+      const ch = last ? +((nr-last.rate)/last.rate*100).toFixed(1) : null;
+      const top3 = [...newCouponData].sort((a,b)=>b.u-a.u).slice(0,3).map(c=>c.n.substring(0,8));
+      const newWeekSummary = {p:'신규 업로드',issued:ti,used:tu,rate:nr,disc:td,txn:tt,ch:ch,memo:'TOP: '+top3.join(' / '),isNew:true};
+      activeSummary = [...SUMMARY, newWeekSummary];
+      const newWeekData = {key:'new',label:'신규 업로드',isNew:true,coupons:[...newCouponData].sort((a,b)=>b.u-a.u).slice(0,20)};
+      activeWeeks = [...ALL_WEEKS, newWeekData];
+    }
+    if (newPointsData) activeDailyPoints = newPointsData;
+    currentWeekIdx = activeWeeks.length - 1;
+    document.getElementById('periodBadge').textContent = activeWeeks.length + '주 누적';
+    document.getElementById('wtabsTitle').textContent = '📅 주차 선택 — 전체 ' + activeWeeks.length + '주 누적';
+    buildKpi(); buildOverview(); buildWeeklyTabs(); buildAction();
+    // Refresh currently visible tab charts
+    const activeTab = document.querySelector('.section.active');
+    if (activeTab) {
+      const id = activeTab.id.replace('tab-','');
+      if (id==='coupon') buildCoupon();
+      if (id==='points') buildPoints();
+      if (id==='weekly') renderWeek(currentWeekIdx);
+    }
+    document.getElementById('loadingEl').classList.remove('show');
+  }, 300);
+}
+
+// ══ BUILD ALL ══
+function buildAll() {
+  buildKpi();
+  buildOverview();   // overview tab is active at init — safe
+  buildWeeklyTabs(); // just renders tab buttons, no canvas
+  buildAction();     // no canvas
+  // coupon/points/weekly charts are rendered lazily on tab click
+}
+
+// ══ KPI ══
+function buildKpi() {
+  const last = activeSummary[activeSummary.length-1];
+  const totalUsed = activeSummary.reduce((s,r)=>s+r.used,0);
+  const maxRate = Math.max(...activeSummary.map(r=>r.rate));
+  const totalPts = activeDailyPoints.reduce((s,d)=>s+d.v,0);
+  const items = [
+    {label:'이번 주 사용 건수', val:last.used.toLocaleString(), sub:'사용률 '+(last.rate*100).toFixed(3)+'%', c:'#00dfa2'},
+    {label:'전주 대비 증감률', val:last.ch!==null?(last.ch>0?'+'+last.ch+'%':last.ch+'%'):'-', sub:'사용률 기준', c:last.ch>0?'#00dfa2':'#ff6b7a'},
+    {label:'누적 사용 건수', val:totalUsed.toLocaleString(), sub:activeSummary.length+'주 합산', c:'#5b7fff'},
+    {label:'역대 최고 사용률', val:(maxRate*100).toFixed(3)+'%', sub:'02.04~02.10', c:'#ffbe5c'},
+    {label:'이번 주 거래액', val:fmt(last.txn)+'원', sub:'쿠폰 사용 거래 합계', c:'#c77dff'},
+    {label:'이번 주 할인액', val:fmt(last.disc)+'원', sub:'쿠폰 할인 합계', c:'#5b7fff'},
+    {label:'포인트 총 사용액', val:fmt(totalPts)+'원', sub:activeDailyPoints.length+'일 누적', c:'#00dfa2'},
+    {label:'발급 수 (최근)', val:fmt(last.issued), sub:'최신 기준', c:'#ffbe5c'},
+  ];
+  document.getElementById('kpiGrid').innerHTML = items.map(k =>
+    '<div class="kpi" style="--kc:'+k.c+'"><div class="kpi-label">'+k.label+'</div><div class="kpi-value">'+k.val+'</div><div class="kpi-sub">'+k.sub+'</div></div>'
+  ).join('');
+}
+
+// ══ OVERVIEW ══
+function buildOverview() {
+  dc('combo'); dc('cat'); dc('monthly');
+  charts.combo = new Chart(document.getElementById('comboChart'), {
+    data:{ labels: activeSummary.map(d=>d.p.substring(0,10)),
+      datasets:[
+        {type:'bar',label:'쿠폰 사용 건수',data:activeSummary.map(d=>d.used),backgroundColor:'rgba(91,127,255,0.65)',borderRadius:4,yAxisID:'y'},
+        {type:'line',label:'포인트(만원)',data:POINTS_WEEKLY.map(d=>Math.round(d.pts/10000)),borderColor:'#00dfa2',backgroundColor:'rgba(0,223,162,0.07)',borderWidth:2,pointRadius:3,tension:0.4,fill:true,yAxisID:'y1'},
+      ]},
+    options:{responsive:true,plugins:{legend:{labels:{color:'#9096c8',font:{size:11}}}},scales:{x:{ticks:{font:{size:9},maxRotation:30}},y:{position:'left',ticks:{callback:v=>v+'건'}},y1:{position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>v+'만'}}}}
+  });
+
+  const lastW = activeWeeks[activeWeeks.length-1];
+  const catMap = {};
+  lastW.coupons.forEach(c => { const cat=catOf(c.n); catMap[cat]=(catMap[cat]||0)+c.t; });
+  charts.cat = new Chart(document.getElementById('catChart'), {
+    type:'doughnut',
+    data:{labels:Object.keys(catMap),datasets:[{data:Object.values(catMap),backgroundColor:C,borderColor:'#0f1322',borderWidth:3}]},
+    options:{responsive:true,plugins:{legend:{position:'right',labels:{color:'#9096c8',font:{size:11},padding:8}},tooltip:{callbacks:{label:ctx=>ctx.label+': '+fmt(ctx.raw)+'원'}}}}
+  });
+
+  const mthMap={};
+  activeDailyPoints.forEach(d=>{const m=d.d.substring(0,7);mthMap[m]=(mthMap[m]||0)+d.v;});
+  const mths=Object.keys(mthMap).sort();
+  charts.monthly = new Chart(document.getElementById('monthlyChart'), {
+    type:'bar',
+    data:{labels:mths,datasets:[{label:'월별 합계',data:mths.map(m=>Math.round(mthMap[m]/10000)),backgroundColor:mths.map((_,i)=>i===mths.length-1?'#ffbe5c':i===mths.length-2?'#00dfa2':'rgba(91,127,255,0.6)'),borderRadius:7}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'만'}}}}
+  });
+}
+
+// ══ COUPON ══
+function buildCoupon() {
+  dc('rate'); dc('count');
+  const labels = activeSummary.map(d=>d.p.substring(0,10));
+  charts.rate = new Chart(document.getElementById('rateChart'), {
+    type:'line',
+    data:{labels,datasets:[{label:'사용률(%)',data:activeSummary.map(d=>(d.rate*100).toFixed(4)),borderColor:'#5b7fff',backgroundColor:'rgba(91,127,255,0.1)',borderWidth:2,pointBackgroundColor:activeSummary.map(d=>d.ch>0?'#00dfa2':d.ch<0?'#ff6b7a':'#5b7fff'),pointRadius:5,tension:0.4,fill:true}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:9},maxRotation:30}},y:{ticks:{callback:v=>v+'%'}}}}
+  });
+  charts.count = new Chart(document.getElementById('countChart'), {
+    type:'bar',
+    data:{labels,datasets:[{label:'사용 건수',data:activeSummary.map(d=>d.used),backgroundColor:activeSummary.map(d=>d.isNew?'#00dfa2':'rgba(91,127,255,0.65)'),borderRadius:5}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{font:{size:9},maxRotation:30}},y:{ticks:{callback:v=>v+'건'}}}}
+  });
+
+  const tbody=document.getElementById('summaryTbody'); tbody.innerHTML='';
+  activeSummary.forEach(row => {
+    const chHtml = row.ch===null?'<span class="muted">기준주</span>': +row.ch>0?'<span class="up">🔺 '+row.ch+'%</span>':'<span class="down">🔻 '+row.ch+'%</span>';
+    tbody.innerHTML+='<tr '+(row.isNew?'style="background:rgba(0,223,162,0.05)"':'')+'>'
+      +'<td class="mono">'+row.p+(row.isNew?' <span class="bdg b-new">NEW</span>':'')+'</td>'
+      +'<td class="mono">'+row.issued.toLocaleString()+'</td>'
+      +'<td class="mono">'+row.used.toLocaleString()+'</td>'
+      +'<td><span class="bdg '+(row.rate>0.18?'b-high':row.rate>0.12?'b-mid':'b-low')+'">'+(row.rate*100).toFixed(3)+'%</span></td>'
+      +'<td class="mono">'+fmt(row.disc)+'원</td>'
+      +'<td class="mono">'+fmt(row.txn)+'원</td>'
+      +'<td>'+chHtml+'</td>'
+      +'<td style="font-size:.72rem;color:var(--muted);max-width:200px">'+(row.memo||'')+'</td></tr>';
+  });
+}
+
+// ══ POINTS ══
+function buildPoints() {
+  dc('daily'); dc('mth'); dc('dow');
+  const pts = activeDailyPoints;
+  const total = pts.reduce((s,d)=>s+d.v,0);
+  const maxDay = pts.reduce((m,d)=>d.v>m.v?d:m,{v:0,d:''});
+  const mthMap={};
+  pts.forEach(d=>{const m=d.d.substring(0,7);mthMap[m]=(mthMap[m]||0)+d.v;});
+  const mths=Object.keys(mthMap).sort();
+  const maxMth=mths.reduce((m,k)=>mthMap[k]>mthMap[m]?k:m,mths[0]);
+  const chg=mths.length>=2?+((mthMap[mths[mths.length-1]]-mthMap[mths[mths.length-2]])/mthMap[mths[mths.length-2]]*100).toFixed(0):null;
+  document.getElementById('pointsKpi').innerHTML=[
+    {label:'포인트 총 사용액', val:fmt(total)+'원', sub:pts.length+'일 누적', c:'#5b7fff'},
+    {label:'일 평균', val:fmt(Math.round(total/pts.length))+'원', sub:'전체 기간', c:'#00dfa2'},
+    {label:'최고 단일일', val:fmt(maxDay.v)+'원', sub:maxDay.d, c:'#ffbe5c'},
+    {label:'최고 월', val:maxMth, sub:fmt(mthMap[maxMth])+'원', c:'#c77dff'},
+    {label:'최근 월 변동', val:chg!==null?(chg>0?'+'+chg+'%':chg+'%'):'-', sub:'전월 대비', c:chg>0?'#00dfa2':'#ff6b7a'},
+    {label:'주중/주말 비율', val:'주중 집중', sub:'수·목 평균 최고', c:'#5b7fff'},
+  ].map(k=>'<div class="kpi" style="--kc:'+k.c+'"><div class="kpi-label">'+k.label+'</div><div class="kpi-value">'+k.val+'</div><div class="kpi-sub">'+k.sub+'</div></div>').join('');
+
+  charts.daily = new Chart(document.getElementById('dailyChart'),{
+    type:'line',
+    data:{labels:pts.map(d=>d.d.substring(5)),datasets:[{label:'포인트 사용액',data:pts.map(d=>d.v),borderColor:'#5b7fff',backgroundColor:'rgba(91,127,255,0.06)',borderWidth:1.5,pointRadius:0,tension:0.3,fill:true}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>fmt(ctx.raw)+'원'}}},scales:{x:{ticks:{maxTicksLimit:20,font:{size:9}}},y:{ticks:{callback:v=>fmt(v)}}}}
+  });
+  charts.mth = new Chart(document.getElementById('mthChart'),{
+    type:'bar',
+    data:{labels:mths,datasets:[{label:'월 합계',data:mths.map(m=>Math.round(mthMap[m]/10000)),backgroundColor:mths.map(m=>m===maxMth?'#00dfa2':'rgba(91,127,255,0.6)'),borderRadius:8}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>v+'만'}}}}
+  });
+  const dowMap={0:0,1:0,2:0,3:0,4:0,5:0,6:0},dowCnt={0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+  pts.forEach(d=>{const dow=new Date(d.d).getDay();dowMap[dow]+=d.v;dowCnt[dow]++;});
+  const dowAvg=[1,2,3,4,5,6,0].map(i=>dowCnt[i]>0?Math.round(dowMap[i]/dowCnt[i]):0);
+  charts.dow = new Chart(document.getElementById('dowChart'),{
+    type:'bar',
+    data:{labels:['월','화','수','목','금','토','일'],datasets:[{label:'일 평균',data:dowAvg,backgroundColor:dowAvg.map((v,i)=>v===Math.max(...dowAvg)?'#00dfa2':i>=5?'#ff6b7a':'rgba(91,127,255,0.65)'),borderRadius:7}]},
+    options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{ticks:{callback:v=>fmt(v)}}}}
+  });
+}
+
+// ══ WEEKLY TABS — 전체 누적 주차 ══
+function buildWeeklyTabs() {
+  const tabsEl = document.getElementById('weekTabs');
+  tabsEl.innerHTML = '';
+  activeWeeks.forEach((w, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'wtab' + (w.isNew?' is-new':'') + (i===currentWeekIdx?' active':'');
+    btn.textContent = w.label;
+    btn.onclick = () => {
+      currentWeekIdx = i;
+      document.querySelectorAll('.wtab').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      renderWeek(i);
+    };
+    tabsEl.appendChild(btn);
+  });
+}
+
+let wkBar=null, wkRate=null;
+function renderWeek(idx) {
+  if(wkBar){wkBar.destroy();wkBar=null;}
+  if(wkRate){wkRate.destroy();wkRate=null;}
+  const w = activeWeeks[idx];
+  const s = activeSummary[idx];
+
+  // Week meta bar
+  const metaEl = document.getElementById('weekMeta');
+  if(s) {
+    const chHtml = s.ch===null?'기준주': s.ch>0?'<span class="up">🔺 '+s.ch+'%</span>':'<span class="down">🔻 '+s.ch+'%</span>';
+    metaEl.innerHTML = [
+      {l:'기간', v:'<span class="mono">'+s.p+'</span>'},
+      {l:'발급 수', v:'<span class="mono">'+s.issued.toLocaleString()+'</span>'},
+      {l:'사용 수', v:'<span style="color:var(--up);font-weight:700;font-family:JetBrains Mono">'+s.used.toLocaleString()+'건</span>'},
+      {l:'사용률', v:'<span class="bdg '+(s.rate>0.18?'b-high':s.rate>0.12?'b-mid':'b-low')+'">'+(s.rate*100).toFixed(3)+'%</span>'},
+      {l:'전주 증감', v:chHtml},
+      {l:'할인액', v:'<span class="mono">'+fmt(s.disc)+'원</span>'},
+      {l:'거래액', v:'<span class="mono">'+fmt(s.txn)+'원</span>'},
+    ].map(x=>'<div class="week-meta-item"><div class="wm-label">'+x.l+'</div><div class="wm-value">'+x.v+'</div></div>').join('');
+    metaEl.style.display='grid';
+  } else { metaEl.style.display='none'; }
+
+  document.getElementById('wkBarTitle').textContent = w.label + ' — 사용 건수 TOP 20';
+  document.getElementById('wkRateTitle').textContent = w.label + ' — 사용률 TOP 20';
+
+  const data = w.coupons||[];
+  if(!data.length){document.getElementById('wkTbody').innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:30px">데이터 없음</td></tr>';return;}
+
+  const byUsed=[...data].sort((a,b)=>b.u-a.u);
+  const byRate=[...data].filter(c=>c.i>=5).sort((a,b)=>b.r-a.r);
+
+  wkBar = new Chart(document.getElementById('wkBarChart'),{
+    type:'bar',
+    data:{labels:byUsed.map(c=>c.n.length>15?c.n.substring(0,14)+'…':c.n),
+      datasets:[{label:'사용 건수',data:byUsed.map(c=>c.u),backgroundColor:byUsed.map((_,i)=>i===0?'#FFD700':i===1?'#C0C0C0':i===2?'#CD7F32':'rgba(91,127,255,0.6)'),borderRadius:4}]},
+    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>v+'건'}},y:{ticks:{font:{size:9}}}}}
+  });
+  wkRate = new Chart(document.getElementById('wkRateChart'),{
+    type:'bar',
+    data:{labels:byRate.map(c=>c.n.length>15?c.n.substring(0,14)+'…':c.n),
+      datasets:[{label:'사용률(%)',data:byRate.map(c=>c.r),backgroundColor:byRate.map(c=>c.r>=15?'#00dfa2':c.r>=5?'#ffbe5c':c.r>=2?'rgba(91,127,255,0.7)':'rgba(255,107,122,0.5)'),borderRadius:4}]},
+    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},scales:{x:{ticks:{callback:v=>v+'%'}},y:{ticks:{font:{size:9}}}}}
+  });
+
+  const tbody=document.getElementById('wkTbody'); tbody.innerHTML='';
+  byUsed.forEach((c,i)=>{
+    const rc=i===0?'r1':i===1?'r2':i===2?'r3':'';
+    tbody.innerHTML+='<tr><td><span class="rank '+rc+'">#'+(i+1)+'</span></td>'
+      +'<td class="cn">'+c.n+'</td>'
+      +'<td class="mono">'+c.i.toLocaleString()+'</td>'
+      +'<td class="mono" style="color:var(--up);font-weight:600">'+c.u.toLocaleString()+'</td>'
+      +'<td><span class="bdg '+(c.r>=15?'b-high':c.r>=5?'b-mid':c.r>=2?'b-low':'b-vlow')+'">'+c.r.toFixed(2)+'%</span></td>'
+      +'<td class="mono">'+fmt(c.d)+'원</td>'
+      +'<td class="mono">'+fmt(c.t)+'원</td></tr>';
+  });
+}
+
+// ══ ACTION ══
+function buildAction() {
+  const last=activeSummary[activeSummary.length-1];
+  const lastW=activeWeeks[activeWeeks.length-1];
+  const top3=[...(lastW.coupons||[])].sort((a,b)=>b.u-a.u).slice(0,3);
+  const topR=[...(lastW.coupons||[])].filter(c=>c.i>=5).sort((a,b)=>b.r-a.r).slice(0,3);
+  const cd=last.ch!==null?+last.ch:0;
+  document.getElementById('insightList').innerHTML=[
+    '<strong>이번 주 '+(cd>0?'▲':'▼')+Math.abs(cd).toFixed(1)+'%</strong>: '+(cd>0?'쿠폰 전략 유효, 유지·확장 권장':'원인 분석 후 쿠폰 구성 재검토 필요'),
+    '<strong>TOP 사용 쿠폰</strong>: '+top3.map(c=>c.n).join(' / '),
+    '<strong>고효율 쿠폰</strong>: '+topR.map(c=>c.n+'('+c.r.toFixed(1)+'%)').join(', ')+' → 소량 타겟 쿠폰 전략 효과적',
+    '<strong>포인트 피크</strong>: 02.25~03.03 (19.0M원) → 쿠폰+포인트 연계 발행이 상승 효과',
+    '<strong>요일 패턴</strong>: 수·목요일 포인트 집중 → 이 타이밍 쿠폰 발행·알림 최적',
+  ].map(t=>'<li>'+t+'</li>').join('');
+  document.getElementById('actionGrid').innerHTML=[
+    {ac:'#00dfa2',pri:'🔥 즉시',title:top3[0]?top3[0].n+' 대상 확대':'TOP 쿠폰 대상 확대',body:'이번 주 사용 1위 쿠폰 동일 조건으로 유사 세그먼트 확대 발급.',tag:'타겟: 유사 구매 이력'},
+    {ac:'#5b7fff',pri:'🔥 즉시',title:'수·목 포인트+쿠폰 번들 푸시',body:'포인트 사용이 수·목에 집중. 이 타이밍 쿠폰 알림 발송으로 구매 전환 극대화.',tag:'채널: 앱 푸시·알림톡'},
+    {ac:'#ffbe5c',pri:'📅 1~2주',title:'신규가입 리타겟팅 쿠폰',body:'가입 후 7일 미구매자 자동 발행. 신규 쿠폰 15~23% 사용률 기반.',tag:'타겟: 가입 후 7일 미구매'},
+    {ac:'#c77dff',pri:'📅 1~2주',title:'한 번 더! 재구매 자동화',body:'구매 완료 48시간 내 자동 발행. 과거 15~27% 사용률 기록.',tag:'타겟: 구매 완료 48h'},
+    {ac:'#ff6b7a',pri:'🗓️ 중기',title:'출석왕 리마인드 자동 푸시',body:'대량 발급 대비 낮은 사용률. D+3/D+7 만료 임박 알림으로 2배 목표.',tag:'채널: 앱 푸시 자동화'},
+    {ac:'#00dfa2',pri:'🗓️ 장기',title:'개인화 쿠폰 체계 구축',body:'구매 품목·빈도 기반 개인화 쿠폰으로 전환. 등급 쿠폰 대비 3~5배 사용률 기대.',tag:'데이터: 구매 이력 연동'},
+  ].map(a=>'<div class="action-card" style="--ac:'+a.ac+'"><div class="ac-priority">'+a.pri+'</div><div class="ac-title">'+a.title+'</div><div class="ac-body">'+a.body+'</div><div class="ac-tag">'+a.tag+'</div></div>').join('');
+}
+
+// ══ INIT — 페이지 로드 시 바로 10주 데이터 렌더 ══
+buildAll();
+</script>
+</body>
+</html>
